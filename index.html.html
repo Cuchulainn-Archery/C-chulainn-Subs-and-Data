@@ -1,0 +1,957 @@
+<!-- SheetJS — lets the browser build a real .xlsx file, not just a CSV. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- Supabase client library — this is what lets the page's own JavaScript
+     talk to your Supabase project (read/write rows) without you writing
+     any networking code by hand. It attaches itself to the browser as a
+     global called "supabase", which the script below uses once, right at
+     the top, to open a connection. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
+<!--
+  CAC SUBS COLLECTOR — a phone-friendly web replacement for the three Excel
+  INPUT sheets (Tue / Sat / Extra). Built as one HTML file: the browser reads
+  this whole file, runs the <style> as the page's look, and runs the
+  <script> at the bottom as the page's behaviour. There is no separate
+  "server" of our own — everything happens on the collector's phone, except
+  the saved entries, which go to the club's own Supabase database so all
+  three collectors (and you) see the same list.
+-->
+<div id="app"></div>
+
+<style>
+  /* ---- Basic look. Kept plain and high-contrast: this gets used outdoors,
+     on phones, by people who are not techies, so big tap targets and clear
+     text beat anything fancy. */
+  #app, #app * { box-sizing: border-box; }
+  #app {
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    max-width: 520px;
+    margin: 0 auto;
+    background: #FFFDF9;
+    color: #241C1A;
+    padding-bottom: 40px;
+  }
+  .header {
+    background: #BF360C; /* the club's own rust colour, taken from your existing INPUT sheets */
+    color: #fff;
+    padding: 14px 16px 0 16px;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+  .header h1 { margin: 0 0 10px 0; font-size: 1.15rem; font-weight: 700; }
+  .tabs { display: flex; gap: 4px; }
+  .tab {
+    flex: 1;
+    text-align: center;
+    padding: 10px 4px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 8px 8px 0 0;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .tab.active { background: #FFFDF9; color: #BF360C; }
+
+  .section { padding: 14px 16px; }
+  .card {
+    background: #fff;
+    border: 1px solid #EADFCF;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  label { display: block; font-size: 0.85rem; font-weight: 600; margin: 10px 0 4px; color: #5C4A3D; }
+  label:first-child { margin-top: 0; }
+  input[type=text], input[type=date], select {
+    width: 100%;
+    font-size: 1rem;
+    padding: 10px;
+    border: 1px solid #D8CDBC;
+    border-radius: 8px;
+    background: #FFFDF9;
+  }
+  .amount-chips { display: flex; gap: 6px; margin-top: 6px; }
+  .chip {
+    flex: 1;
+    text-align: center;
+    padding: 8px 4px;
+    border: 1px solid #D8CDBC;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    background: #FFFDF9;
+  }
+  .chip.selected { background: #C8E6C9; border-color: #6B9A6F; font-weight: 700; }
+
+  .member-list {
+    border: 1px solid #D8CDBC;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .member-item { padding: 9px 10px; border-bottom: 1px solid #F0E9DD; cursor: pointer; }
+  .member-item:last-child { border-bottom: none; }
+  .member-item:active { background: #FDF3E7; }
+
+  button.primary {
+    width: 100%;
+    padding: 12px;
+    background: #BF360C;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 700;
+    margin-top: 12px;
+    cursor: pointer;
+  }
+  button.primary:disabled { background: #D8CDBC; }
+  button.secondary {
+    width: 100%;
+    padding: 10px;
+    background: transparent;
+    color: #BF360C;
+    border: 1px solid #BF360C;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-top: 8px;
+    cursor: pointer;
+  }
+
+  .entry-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #F0E9DD;
+    font-size: 0.92rem;
+  }
+  .entry-row:last-child { border-bottom: none; }
+  .entry-main { flex: 1; }
+  .entry-amt { font-weight: 700; margin-right: 10px; white-space: nowrap; }
+  .entry-del { color: #A33; font-size: 0.85rem; cursor: pointer; padding: 4px 6px; }
+  .entry-notes { font-size: 0.78rem; color: #8A7A6A; }
+
+  .total-line { display: flex; justify-content: space-between; font-weight: 700; padding-top: 10px; margin-top: 6px; border-top: 2px solid #EADFCF; }
+  .muted { color: #8A7A6A; font-size: 0.85rem; }
+  .banner { background: #FFF9E6; border: 1px solid #E8D98C; border-radius: 8px; padding: 10px; font-size: 0.82rem; margin-bottom: 14px; }
+  .status-msg { font-size: 0.82rem; text-align: center; padding: 6px; color: #8A7A6A; }
+</style>
+
+<script>
+(function () {
+
+  /* ============================================================
+     1. DATA THAT DOESN'T CHANGE WHILE THE APP RUNS
+     ============================================================ */
+
+  // The three sessions, exactly matching your three current INPUT files.
+  // PIN required before "Export for DAILY" runs. This is a deterrent, not
+  // real security — it lives in this page's own code, so anyone who views
+  // the page source can read it. It stops casual use by someone with the
+  // link, nothing more. CHANGE THIS to whatever PIN you want the three
+  // collectors to use.
+  const EXPORT_PIN = "1947";
+
+  const SESSIONS = ["Tuesday", "Saturday", "Extra"];
+
+  // ---- Supabase project connection ----
+  // SUPABASE_URL is this project's address. SUPABASE_KEY is the
+  // "publishable" (public) key — safe to sit here in plain view, because
+  // it's meant to be public; the real gate is the Row Level Security
+  // policies set up on the database side, not secrecy of this key. NEVER
+  // put the "service_role" key here — that one bypasses all the security
+  // rules and must never appear in anything the browser can see.
+  const SUPABASE_URL = "https://ajxiqmzfdqxospzazsfj.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_A9wrzBOhSK8ldGXr5JQolQ_3u9jSpW4";
+
+  // "supabase" here is the global the <script> tag above attached to the
+  // browser window. .createClient(...) opens the actual connection object
+  // we'll use for every read/write from here on. Named "sb" (not
+  // "supabase") purely so it can't be confused with that global.
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  // Full member list, copied straight from column J of your Extra Session
+  // file. Same list is used for all three tabs. When membership changes,
+  // this array is the one place to edit.
+  const MEMBERS = ["Andrus, Oleksandr","Banks, Christy","Barry, James (Shay)","Barry, Mick","Barry, Pádraic","Barry, Sibongile","Barry, Stephanie","Bassaler, Magali","Bassaler, Wulfric (J)","Behan, Derek","Bellew, John","Bradley, Niall Fish","Brohan-Williams, Michelle","Burke 2, Joe","Burke, Dolores","Burke, Lisa","Burke, William","Byrne Kirk, Joanne","Callaghan, Aideen (J)","Callaghan, Noleen","Campbell, Adam","Carr, Bridget (J)","Carr, Cella","Carr, Dominic (J)","Carr, James (J)","Casey, Chris","Casey, Áine","Chai, Christabel","Clarke, Adam (J)","Clarke, Brigid (J)","Clarke, Mary","Cleary, Áine","Coan, Kate (J)","Connell, David","Convery, Alan","Creedon, Seán","Cronin, Tony","Crummy, Seán","Cummins, Anne","De Toledo, Giulherme","Donnelly, Kevin","Donnelly, Oisin","Donovan, Myles (J)","Doyle Drenin Sleafer, Eve (J)","Doyle Drenin Sleafer, Iain","Doyle Drenin Sleafer, Nicola","Duffy, Alan","Farrelly, Laura","Finnegan, Karen","Fitzpatrick, Philip","Forde, Brendan","Gallagher, Derek","Gallagher, Jordan","Galushchenko, Victoria","Gancarz, (Lucaz) AI","Gancarz, Joanna","Gancarz, Krystin (J)","Gancarz, Krzysztof (J)","García Morán, Lucía","Gerrard, Jana","Gerrard, Juliette (J)","Gilmore, Peter","Gorman, Tommy","Graham, Jason","Graham, Leah (J)","Graham, Richelle","Gregory, Anthony","Hamad, Mohammed","Harrison, Briege","Hayes, Melissa","Heinz, Claudia","Irbe, Sintija","Judge, Fiachra","Judge, Leon (J)","Keeble, Neil","Keeble, Siobhán","Keirns, Heather (J)","Kirkwood, Tadhg (J)","Kovalenko, Anastasiia","Lamb, Catherine","Lamb, Daniel","Laramie, Eamonn","Larkin, Gerard","Lebanese, Richard","Leech, Caroline","Lynch, Patrick","Lynch, Piaras","MacArtain, Niall (J)","Markey, Thomas (J)","Martin, Seán","McCabe, Philip","McCann, Aoife (J)","McCann, Nichola","McCarthy, Orlaith","McClelland, Gilbert","McCooey, Paul","McDonnell, Jane","McGlynn, David","McKenna, Leanne (J)","McKenna, Tomas","McLoughlin, Amy","McManus, Avril (J)","McShane (DKIT), Stephen","McShane, Ché","McShane, Ché (J)","McShane, James","Moloney, James","Mullins, Brendan","Mullooly, Michael","Murray, Ann Marie","Murtagh, Ellen","Navarro, Kevin","Ni Dhuinn, Coblaith","Norris, Tamlyn","Nugent, Alan","Nugent, Evan (J)","Nugent, Luke (J)","NíChristail, Rosie (J)","O'Connor, AnnMarie","O'Donnell, Roseanne","O'Keane Egan, Ardyn","O'Keane Egan, Carolyn","O'Keefe, Aibhlín (J)","O'Rourke, Aideen","Philips, Catherine","Philips, Chloe (J)","Power, Catherine","Quaile, Adrian","Quinn, Adria","Quinn, Gerard (J)","Ralph, Arán","Reilly, Rhys (J)","Reynolds, Niall","Ribeiro-O'Mahony, Hellen","Ribeiro-O'Mahony, Rob","Roden, Kevin","Rogers, Christina","Rogers, Deirdre","Rogers, Eamonn","Rossborough, Michael","Ruddy, Aidan","Ruddy, Danielle","Ryan, Alan","Scarpellini, Camila","Sheridan, David","Skelton, Michael","Tait, Andy","Tormey, Carl","Tormey, Warrick (J)","Torres-Kerrigan, Odin","Traynor, Ronan","Traynor, Rory (J)","Varghese, Ginu","Vaughey, Leanne","Ward, Terrence","Wilson, Darrel","Woods, Saoirse","Wright, Lorraine","Young, Mark","Young, Rudhrai (J)"];
+
+  /* ============================================================
+     2. APP STATE — plain variables holding "what's on screen right now".
+     Nothing here survives a page reload except what we explicitly save to
+     the Supabase database (section 3, below) — that's the whole point of
+     using a real database instead of keeping everything in these variables.
+     ============================================================ */
+
+  let currentTab = SESSIONS[0];   // which session tab is open
+  let collectorName = "";         // typed once, kept for this visit
+  let sessionDate = "";           // yyyy-mm-dd from the date picker
+  let memberFilter = "";          // what's typed in the member search box
+  let pickedMember = "";          // member chosen from the filtered list
+  let amountValue = "";           // free-typed amount
+  let amountChip = "";            // "0" or ":" if a quick-chip was tapped instead
+  let notesValue = "";
+  let entries = [];               // entries already saved for the CURRENT tab+date
+  let currentSessionId = null;    // the sessions-table row ID for the CURRENT tab+date, once it exists
+  let reviewOpen = false;         // whether the "all sessions" review panel is showing
+  let allSessionsCache = null;    // loaded on demand when review panel opens
+  let exportPinOpen = false;      // whether the PIN entry is showing, waiting for input
+  let exportPinValue = "";        // what's currently typed into the PIN box
+  let exportConfirmOpen = false;  // showing the "did the Excel transfer work?" step
+  let exportedSessionIds = [];    // which sessions-table row IDs were just exported, pending confirmation
+  let clearHistoryPinOpen = false; // PIN entry for wiping already-transferred history
+  let clearHistoryPinValue = "";
+  let statusMsg = "";             // small text feedback line ("Saved.", "Loading…", etc.)
+
+  /* ============================================================
+     3. STORAGE HELPERS
+     A "session" here means one collection day for one tab — e.g.
+     Tuesday 16/09/2026 — and is one ROW in the `sessions` table. Each
+     payment logged against it is a separate ROW in the `entries` table,
+     linked back by session_id. All three collectors (and you) read and
+     write the SAME two tables — that's what makes this replace three
+     separate Excel files.
+
+     Every call below follows the same shape: `await sb.from('table')....`
+     returns an object with `{ data, error }` — `data` is what you asked
+     for (or null on failure), `error` is null on success or an object
+     describing what went wrong. We check `error` after every call and
+     throw if it's set, so failures surface as a caught exception exactly
+     like the old window.storage calls did — the rest of the app (the
+     "Saving…" / "Save failed" logic in addEntry, for example) doesn't
+     need to know anything changed underneath.
+
+     Two small mapping functions translate between the database's column
+     names (session_type, session_date, member_name — chosen to be
+     unambiguous in the schema) and the names the rest of this file
+     already uses (session, isoDate, member — chosen when this was a
+     prototype). Keeping that translation in one place here means nothing
+     below this section needed to change.
+     ============================================================ */
+
+  function mapEntryRow(row) {
+    return { id: row.id, member: row.member_name, amount: row.amount, notes: row.notes || "" };
+  }
+
+  function mapSessionRow(row) {
+    return {
+      id: row.id,
+      session: row.session_type,
+      isoDate: row.session_date,
+      collector: row.collector || "",
+      transferred: row.transferred,
+      entries: (row.entries || []).map(mapEntryRow)
+    };
+  }
+
+  async function findOrNullSession(session, isoDate) {
+    // .maybeSingle() returns data: null (no error) when nothing matches —
+    // unlike .single(), which would treat "not found" as an error. That's
+    // exactly what we want: "no session logged yet for this day" is a
+    // normal, expected case, not a failure.
+    const { data, error } = await sb
+      .from("sessions")
+      .select("id, collector, transferred")
+      .eq("session_type", session)
+      .eq("session_date", isoDate)
+      .maybeSingle();
+    if (error) throw error;
+    return data; // null, or { id, collector, transferred }
+  }
+
+  async function loadSession(session, isoDate) {
+    if (!isoDate) return { id: null, collector: "", entries: [] };
+
+    const row = await findOrNullSession(session, isoDate);
+    if (!row) return { id: null, collector: "", entries: [] };
+
+    const { data, error } = await sb
+      .from("entries")
+      .select("id, member_name, amount, notes")
+      .eq("session_id", row.id)
+      .order("created_at", { ascending: true });
+    if (error) throw error;
+
+    return {
+      id: row.id,
+      collector: row.collector || "",
+      entries: (data || []).map(mapEntryRow)
+    };
+  }
+
+  async function ensureSessionRow(session, isoDate, collector) {
+    // Called right before the FIRST entry of a session-day is added. Finds
+    // the existing row if one already exists (e.g. a different collector
+    // started this session-day first), or creates it if not — either way,
+    // returns its database ID so the entry can be linked to it.
+    const existing = await findOrNullSession(session, isoDate);
+    if (existing) return existing.id;
+
+    const { data, error } = await sb
+      .from("sessions")
+      .insert({ session_type: session, session_date: isoDate, collector })
+      .select("id")
+      .single();
+    if (error) throw error;
+    return data.id;
+  }
+
+  async function insertEntry(sessionId, entry) {
+    const { data, error } = await sb
+      .from("entries")
+      .insert({
+        session_id: sessionId,
+        member_name: entry.member,
+        amount: entry.amount,
+        notes: entry.notes || ""
+      })
+      .select("id, member_name, amount, notes")
+      .single();
+    if (error) throw error;
+    return mapEntryRow(data);
+  }
+
+  async function deleteEntry(entryId) {
+    const { error } = await sb.from("entries").delete().eq("id", entryId);
+    if (error) throw error;
+  }
+
+  async function markSessionsTransferred(ids) {
+    // Called only after the person confirms the Excel side actually
+    // worked. Flips transferred=true on each of these sessions rows so
+    // future exports skip them — the rows themselves (and their entries)
+    // stay in the database as a permanent record; they just stop being
+    // offered for transfer again.
+    const { error } = await sb
+      .from("sessions")
+      .update({ transferred: true })
+      .in("id", ids);
+    if (error) throw error;
+  }
+
+  async function deleteTransferredSessions(sessionList) {
+    // Permanently removes sessions rows already marked transferred=true.
+    // Only ever called on the "Already transferred" list — never touches
+    // anything still outstanding. This is irreversible: deleting a
+    // sessions row also deletes its entries automatically (the "on delete
+    // cascade" set up in the schema), which is exactly why this sits
+    // behind the PIN.
+    const ids = sessionList.map(s => s.id);
+    const { error } = await sb.from("sessions").delete().in("id", ids);
+    if (error) throw error;
+  }
+
+  async function loadAllSessions() {
+    // Pulls every session-day row AND its entries in one request, for the
+    // review/export screen. "entries(id, member_name, amount, notes)"
+    // asks Supabase to also fetch each session's related entries rows —
+    // it knows how they're related because of the session_id foreign key
+    // set up in the schema.
+    const { data, error } = await sb
+      .from("sessions")
+      .select("id, session_type, session_date, collector, transferred, entries(id, member_name, amount, notes)")
+      .order("session_date", { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapSessionRow);
+  }
+
+  /* ============================================================
+     4. RENDER — this rebuilds the whole visible page from the state
+     variables above every time something changes. That's a common
+     pattern in small hand-written web apps: instead of hunting down
+     one specific bit of HTML to update, just redraw everything from
+     scratch. Slower in theory, unnoticeable at this size.
+     ============================================================ */
+
+  function ddmmyyyy(iso) {
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-");
+    return `${d}/${m}/${y}`;
+  }
+
+  // JavaScript's built-in Date.getDay() returns 0 for Sunday, 1 for
+  // Monday, 2 for Tuesday... up to 6 for Saturday. This maps each of our
+  // three session tabs to the ONE weekday number it's allowed to use —
+  // "Extra" has no entry here on purpose, meaning it accepts any date.
+  const REQUIRED_WEEKDAY = { Tuesday: 2, Saturday: 6 };
+  const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+  function weekdayNameOf(isoDate) {
+    // Built from the individual Y/M/D numbers (not from the raw ISO
+    // string) for the same reason isoToDateObj is, further down — parsing
+    // "2026-11-17" as a string treats it as UTC midnight, which can shift
+    // to the PREVIOUS day once converted to Irish local time, silently
+    // naming the wrong weekday.
+    const [y, m, d] = isoDate.split("-").map(Number);
+    return WEEKDAY_NAMES[new Date(y, m - 1, d).getDay()];
+  }
+
+  function dateMismatchMessage(session, isoDate) {
+    // Returns null when the date is fine for this tab (including "Extra",
+    // which has no restriction at all), or an explanatory message when
+    // it isn't — used to block "Add entry" and show why.
+    const required = REQUIRED_WEEKDAY[session];
+    if (required === undefined || !isoDate) return null;
+    const actualName = weekdayNameOf(isoDate);
+    if (WEEKDAY_NAMES[required] === actualName) return null;
+    return `${session} sessions need a ${WEEKDAY_NAMES[required]} date — ${ddmmyyyy(isoDate)} is a ${actualName}. Use the Extra tab for an odd one-off date.`;
+  }
+
+  function filteredMembers() {
+    if (!memberFilter) return [];
+    const f = memberFilter.toLowerCase();
+
+    // Break "McCann, Nichola" into ["mccann", "nichola"] — splitting on
+    // anything that ISN'T a letter (comma, space, brackets). A match only
+    // counts if the typed text sits at the START of one of these whole
+    // words. That's what stops "mo" from matching inside "Eamonn", or
+    // "col" from matching inside "Nicola" — old-style .includes() matched
+    // ANY position in the string, which is why those false hits appeared.
+    const wordsOf = m => m.toLowerCase().split(/[^a-zà-ÿ']+/).filter(Boolean);
+
+    const surnameMatches = [];   // surname (first word) starts with the typed text
+    const otherMatches = [];     // a first name / other word starts with it instead
+
+    MEMBERS.forEach(m => {
+      const words = wordsOf(m);
+      if (words.length === 0) return;
+      if (words[0].startsWith(f)) {
+        surnameMatches.push(m);
+      } else if (words.some(w => w.startsWith(f))) {
+        otherMatches.push(m);
+      }
+    });
+
+    // Surname matches first (that's what a collector is usually typing),
+    // first-name matches after, combined list capped at 8 for the phone screen.
+    return surnameMatches.concat(otherMatches).slice(0, 8);
+  }
+
+  function currentAmountDisplay() {
+    return amountChip || amountValue;
+  }
+
+  function totalFor(entryList) {
+    // Only numeric amounts count toward the cash total; "0" and ":" don't
+    // represent money collected, same as in the Excel sheets.
+    return entryList.reduce((sum, e) => {
+      const n = parseFloat(e.amount);
+      return isNaN(n) ? sum : sum + n;
+    }, 0);
+  }
+
+  function render() {
+    const app = document.getElementById("app");
+
+    const tabsHtml = SESSIONS.map(s =>
+      `<div class="tab ${s === currentTab ? 'active' : ''}" data-tab="${s}">${s}</div>`
+    ).join("");
+
+    const memberSuggestions = filteredMembers();
+    const memberListHtml = memberSuggestions.length
+      ? `<div class="member-list">${memberSuggestions.map(m =>
+          `<div class="member-item" data-member="${m}">${m}</div>`).join("")}</div>`
+      : "";
+
+    const dateWarning = dateMismatchMessage(currentTab, sessionDate);
+    const canAdd = sessionDate && pickedMember && (amountValue || amountChip) && !dateWarning;
+
+    const entriesHtml = entries.length
+      ? entries.map((e, i) => `
+          <div class="entry-row">
+            <div class="entry-main">
+              ${e.member}
+              ${e.notes ? `<div class="entry-notes">${e.notes}</div>` : ""}
+            </div>
+            <div class="entry-amt">${e.amount === ":" ? "family" : (e.amount === "0" ? "owes" : "€" + e.amount)}</div>
+            <div class="entry-del" data-del="${i}">remove</div>
+          </div>`).join("")
+      : `<div class="muted">No entries yet for this date.</div>`;
+
+    const total = totalFor(entries);
+
+    let reviewHtml = "";
+    if (reviewOpen) {
+      if (allSessionsCache === null) {
+        reviewHtml = `<div class="card"><div class="status-msg">Loading all sessions…</div></div>`;
+      } else {
+        const outstanding = allSessionsCache.filter(s => !s.transferred);
+        const done = allSessionsCache.filter(s => s.transferred);
+        const outstandingTotal = outstanding.reduce((sum, s) => sum + totalFor(s.entries || []), 0);
+
+        const rowHtml = s => `
+          <div class="entry-row">
+            <div class="entry-main">${s.session} — ${ddmmyyyy(s.isoDate)}${s.transferred ? ' <span class="muted">(transferred)</span>' : ''}<div class="entry-notes">${(s.entries||[]).length} entries, collected by ${s.collector || "—"}</div></div>
+            <div class="entry-amt">€${totalFor(s.entries || []).toFixed(2)}</div>
+          </div>`;
+
+        let actionHtml = "";
+        if (exportConfirmOpen) {
+          actionHtml = `
+            <div class="banner">File downloaded. Only tap "Confirm" below once ProcessTransfer + cleanup has actually succeeded in Excel for this file — that's what stops these entries being exported again.</div>
+            <button class="primary" id="confirmTransferred">Confirm — it landed in DAILY</button>
+            <button class="secondary" id="cancelTransferConfirm">Not yet / it failed — keep for re-export</button>
+          `;
+        } else if (exportPinOpen) {
+          actionHtml = `
+            <label>Enter PIN to export</label>
+            <input type="text" id="pinInput" value="${exportPinValue}" inputmode="numeric" placeholder="PIN" autocomplete="off" />
+            <button class="primary" id="pinConfirm">Confirm</button>
+            <button class="secondary" id="pinCancel">Cancel</button>
+          `;
+        } else {
+          actionHtml = `<button class="secondary" id="exportBtn">Export for DAILY (.xlsx)</button>`;
+        }
+
+        reviewHtml = `
+          <div class="card">
+            <div class="muted" style="margin-bottom:8px;">Not yet transferred</div>
+            ${outstanding.map(rowHtml).join("") || '<div class="muted">Nothing outstanding.</div>'}
+            <div class="total-line"><span>Outstanding total</span><span>€${outstandingTotal.toFixed(2)}</span></div>
+            ${actionHtml}
+          </div>
+          ${done.length ? `
+          <div class="card">
+            <div class="muted" style="margin-bottom:8px;">Already transferred</div>
+            ${done.map(rowHtml).join("")}
+            ${clearHistoryPinOpen ? `
+              <div class="banner">This permanently deletes these ${done.length} record(s). Only do this once you're confident DAILY already holds this data — this is not the DAILY copy, only this app's record of it.</div>
+              <label>Enter PIN to clear history</label>
+              <input type="text" id="clearPinInput" value="${clearHistoryPinValue}" inputmode="numeric" placeholder="PIN" autocomplete="off" />
+              <button class="primary" id="clearPinConfirm">Confirm — delete permanently</button>
+              <button class="secondary" id="clearPinCancel">Cancel</button>
+            ` : `
+              <button class="secondary" id="clearHistoryBtn">Clear transferred history</button>
+            `}
+          </div>` : ""}
+        `;
+      }
+    }
+
+    app.innerHTML = `
+      <div class="header">
+        <h1>Cúchulainn AC — Subs Collector</h1>
+        <div class="tabs">${tabsHtml}</div>
+      </div>
+      <div class="section">
+        <div class="banner">Entries save to a shared list the moment you tap "Add entry" — the other two collectors and the club treasurer can all see it. Don't share this link outside the collection team.</div>
+
+        <div class="card">
+          <label>Collected by</label>
+          <input type="text" id="collectorInput" value="${collectorName}" placeholder="Your name" />
+
+          <label>Session date</label>
+          <input type="date" id="dateInput" value="${sessionDate}" />
+          ${dateWarning ? `<div class="banner" style="margin-top:8px; margin-bottom:0;">${dateWarning}</div>` : ""}
+        </div>
+
+        <div class="card">
+          <label>Member</label>
+          <input type="text" id="memberInput" value="${pickedMember ? pickedMember : memberFilter}" placeholder="Type a surname…" autocomplete="off" />
+          ${memberListHtml}
+
+          <label>Amount</label>
+          <input type="text" id="amountInput" value="${amountValue}" placeholder="e.g. 5.00" inputmode="decimal" />
+          <div class="amount-chips">
+            <div class="chip ${amountChip === '0' ? 'selected' : ''}" data-chip="0">0 = attended, owes</div>
+            <div class="chip ${amountChip === ':' ? 'selected' : ''}" data-chip=":">: = family covered</div>
+          </div>
+
+          <label>Notes</label>
+          <input type="text" id="notesInput" value="${notesValue}" placeholder="Optional — e.g. NEW MEMBER" />
+
+          <button class="primary" id="addBtn" ${canAdd ? "" : "disabled"}>Add entry</button>
+          <div class="status-msg">${statusMsg}</div>
+        </div>
+
+        <div class="card">
+          <div class="muted" style="margin-bottom:6px;">${currentTab} — ${sessionDate ? ddmmyyyy(sessionDate) : "pick a date above"}</div>
+          ${entriesHtml}
+          <div class="total-line"><span>Total this session</span><span>€${total.toFixed(2)}</span></div>
+        </div>
+
+        <button class="secondary" id="reviewToggle">${reviewOpen ? "Hide all sessions" : "Review all sessions"}</button>
+        ${reviewHtml}
+      </div>
+    `;
+
+    wireEvents();
+  }
+
+  /* ============================================================
+     5. EVENTS — after every render() we re-attach click/typing handlers,
+     because innerHTML replaced the old elements (and their old handlers)
+     with brand new ones.
+     ============================================================ */
+
+  function wireEvents() {
+    document.querySelectorAll(".tab").forEach(el => {
+      el.onclick = async () => {
+        currentTab = el.dataset.tab;
+        await refreshEntries();
+      };
+    });
+
+    const collectorInput = document.getElementById("collectorInput");
+    collectorInput.oninput = () => { collectorName = collectorInput.value; };
+
+    const dateInput = document.getElementById("dateInput");
+    dateInput.onchange = async () => {
+      sessionDate = dateInput.value;
+      await refreshEntries();
+    };
+
+    const memberInput = document.getElementById("memberInput");
+    memberInput.oninput = () => {
+      pickedMember = "";
+      memberFilter = memberInput.value;
+      render();
+      // put focus back and cursor at the end, since render() rebuilt the input
+      const el = document.getElementById("memberInput");
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    };
+
+    document.querySelectorAll(".member-item").forEach(el => {
+      el.onclick = () => {
+        pickedMember = el.dataset.member;
+        memberFilter = "";
+        render();
+      };
+    });
+
+    const amountInput = document.getElementById("amountInput");
+    amountInput.oninput = () => {
+      amountChip = "";
+      amountValue = amountInput.value;
+      render();
+      const el = document.getElementById("amountInput");
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    };
+
+    document.querySelectorAll(".chip").forEach(el => {
+      el.onclick = () => {
+        amountChip = (amountChip === el.dataset.chip) ? "" : el.dataset.chip;
+        amountValue = "";
+        render();
+      };
+    });
+
+    const notesInput = document.getElementById("notesInput");
+    notesInput.oninput = () => { notesValue = notesInput.value; };
+
+    document.getElementById("addBtn").onclick = addEntry;
+
+    document.querySelectorAll("[data-del]").forEach(el => {
+      el.onclick = () => removeEntry(parseInt(el.dataset.del, 10));
+    });
+
+    document.getElementById("reviewToggle").onclick = async () => {
+      reviewOpen = !reviewOpen;
+      // Re-fetch every time Review is OPENED, not just the first time —
+      // otherwise this screen can show a stale snapshot from earlier in
+      // the page's life, which is exactly how one collector's phone (or
+      // another browser tab) marking a session transferred could be
+      // invisible here until a full page reload. Re-fetching on every
+      // open costs one extra network round trip but guarantees what you
+      // see (and what "Clear transferred history" acts on) is current.
+      if (reviewOpen) {
+        statusMsg = "Loading all sessions…";
+        render(); // show "loading" immediately
+        try {
+          allSessionsCache = await loadAllSessions();
+          statusMsg = "";
+        } catch (e) {
+          allSessionsCache = allSessionsCache || [];
+          statusMsg = "Couldn't load sessions — check your connection and try again.";
+        }
+      }
+      render();
+    };
+
+    const exportBtn = document.getElementById("exportBtn");
+    if (exportBtn) {
+      exportBtn.onclick = () => {
+        exportPinOpen = true;
+        exportPinValue = "";
+        render();
+      };
+    }
+
+    const pinInput = document.getElementById("pinInput");
+    if (pinInput) {
+      pinInput.oninput = () => { exportPinValue = pinInput.value; };
+    }
+
+    const pinConfirm = document.getElementById("pinConfirm");
+    if (pinConfirm) {
+      pinConfirm.onclick = () => {
+        if (exportPinValue === EXPORT_PIN) {
+          exportPinOpen = false;
+          exportXlsx();
+        } else {
+          statusMsg = "Incorrect PIN.";
+          exportPinValue = "";
+          render();
+        }
+      };
+    }
+
+    const pinCancel = document.getElementById("pinCancel");
+    if (pinCancel) {
+      pinCancel.onclick = () => {
+        exportPinOpen = false;
+        exportPinValue = "";
+        render();
+      };
+    }
+
+    const confirmTransferred = document.getElementById("confirmTransferred");
+    if (confirmTransferred) {
+      confirmTransferred.onclick = async () => {
+        statusMsg = "Marking as transferred…";
+        render();
+        try {
+          await markSessionsTransferred(exportedSessionIds);
+          allSessionsCache = await loadAllSessions();   // refresh so the split lists update
+          await refreshCurrentSessionSilently();        // keep the current-session card in sync too
+          statusMsg = "Marked as transferred.";
+        } catch (e) {
+          statusMsg = "Couldn't mark as transferred — check your connection and try again.";
+        }
+        exportedSessionIds = [];
+        exportConfirmOpen = false;
+        render();
+      };
+    }
+
+    const cancelTransferConfirm = document.getElementById("cancelTransferConfirm");
+    if (cancelTransferConfirm) {
+      cancelTransferConfirm.onclick = () => {
+        // Nothing gets marked — these sessions stay outstanding and will
+        // be offered again on the next export attempt.
+        exportedSessionIds = [];
+        exportConfirmOpen = false;
+        render();
+      };
+    }
+
+    const clearHistoryBtn = document.getElementById("clearHistoryBtn");
+    if (clearHistoryBtn) {
+      clearHistoryBtn.onclick = () => {
+        clearHistoryPinOpen = true;
+        clearHistoryPinValue = "";
+        render();
+      };
+    }
+
+    const clearPinInput = document.getElementById("clearPinInput");
+    if (clearPinInput) {
+      clearPinInput.oninput = () => { clearHistoryPinValue = clearPinInput.value; };
+    }
+
+    const clearPinConfirm = document.getElementById("clearPinConfirm");
+    if (clearPinConfirm) {
+      clearPinConfirm.onclick = async () => {
+        if (clearHistoryPinValue !== EXPORT_PIN) {
+          statusMsg = "Incorrect PIN.";
+          clearHistoryPinValue = "";
+          render();
+          return;
+        }
+        const toDelete = (allSessionsCache || []).filter(s => s.transferred);
+        clearHistoryPinOpen = false;
+        statusMsg = "Deleting…";
+        render();
+        try {
+          await deleteTransferredSessions(toDelete);
+          allSessionsCache = await loadAllSessions();
+          await refreshCurrentSessionSilently();   // keep the current-session card in sync too
+          statusMsg = `Deleted ${toDelete.length} record(s).`;
+        } catch (e) {
+          statusMsg = "Couldn't delete — check your connection and try again.";
+        }
+        render();
+      };
+    }
+
+    const clearPinCancel = document.getElementById("clearPinCancel");
+    if (clearPinCancel) {
+      clearPinCancel.onclick = () => {
+        clearHistoryPinOpen = false;
+        clearHistoryPinValue = "";
+        render();
+      };
+    }
+  }
+
+  /* ============================================================
+     6. ACTIONS
+     ============================================================ */
+
+  async function refreshCurrentSessionSilently() {
+    // Re-pulls the CURRENTLY SELECTED tab/date's entries and session ID
+    // from the database, without touching statusMsg or calling render() —
+    // the caller does both of those itself afterward. Used after a Review
+    // action (Confirm / Clear) that might have changed or deleted the
+    // very session this card is showing, so it never keeps displaying
+    // rows that the database no longer has (which, left unrefreshed,
+    // could also leave currentSessionId pointing at a session row that
+    // was just deleted — any later "Add entry" for this tab/date would
+    // then fail, trying to attach to a session ID that no longer exists).
+    try {
+      const data = await loadSession(currentTab, sessionDate);
+      currentSessionId = data.id;
+      entries = data.entries || [];
+    } catch (e) {
+      // If this quiet refresh fails, leave things as they were — the
+      // caller's own status message (e.g. "Deleted 3 record(s).") still
+      // matters more than this background sync, and reselecting the tab
+      // or date later will correct it anyway.
+    }
+  }
+
+  async function refreshEntries() {
+    statusMsg = "Loading…";
+    render();
+    try {
+      const data = await loadSession(currentTab, sessionDate);
+      currentSessionId = data.id;
+      entries = data.entries || [];
+      if (data.collector && !collectorName) collectorName = data.collector;
+      statusMsg = "";
+    } catch (e) {
+      statusMsg = "Couldn't load — check your connection and try again.";
+    }
+    render();
+  }
+
+  async function addEntry() {
+    const amount = amountChip || amountValue;
+    const entry = { member: pickedMember, amount, notes: notesValue };
+
+    statusMsg = "Saving…";
+    render();
+    try {
+      // If this is the first entry logged for this session-day, the
+      // sessions row doesn't exist yet — create it (or pick up one
+      // another collector already started) and remember its ID.
+      if (!currentSessionId) {
+        currentSessionId = await ensureSessionRow(currentTab, sessionDate, collectorName);
+      }
+      // Only insert into the local list AFTER the database confirms the
+      // write — unlike the old push-then-rollback approach, there's
+      // nothing to undo if this fails, since we never added it locally.
+      const savedEntry = await insertEntry(currentSessionId, entry);
+      entries.push(savedEntry);
+      statusMsg = "Saved.";
+    } catch (e) {
+      statusMsg = "Save failed — check your connection and try again.";
+    }
+
+    // Clear the entry fields for the next one, keep collector/date as they are.
+    pickedMember = "";
+    memberFilter = "";
+    amountValue = "";
+    amountChip = "";
+    notesValue = "";
+    render();
+  }
+
+  async function removeEntry(index) {
+    const entry = entries[index];
+    if (!entry) return;
+    statusMsg = "Removing…";
+    render();
+    try {
+      await deleteEntry(entry.id);
+      entries.splice(index, 1);
+      statusMsg = "";
+    } catch (e) {
+      statusMsg = "Couldn't remove — check your connection and try again.";
+    }
+    render();
+  }
+
+  function isoToDateObj(iso) {
+    // Building the Date from the individual YYYY/MM/DD numbers (not from
+    // the ISO string directly) avoids a timezone trap: parsing "2026-09-16"
+    // as a string makes JS treat it as UTC midnight, which can silently
+    // become the 15th once converted to Irish local time. Building it from
+    // the numbers keeps it as 16 Sept, local, no shift.
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  function amountForCell(raw) {
+    // ":" stays literal text (that's the "family covered" code TransferCore
+    // checks for). Anything else gets sent as a real number where possible,
+    // matching how TransferCore expects to find it (IsNumeric / CDbl).
+    if (raw === ":") return ":";
+    const n = Number(raw);
+    return isNaN(n) ? raw : n;
+  }
+
+  function exportXlsx() {
+    // Build one worksheet as an array of rows (array-of-arrays), columns
+    // A–E, laid out exactly the way TransferCore reads an INPUT file:
+    //   - a row starting "SESSION" in col A, with the date in col C and
+    //     the session type in col D
+    //   - the next row has "Member Name" in col B (TransferCore uses this
+    //     as a marker to skip the header row)
+    //   - then one row per entry: col B = member, col C = amount,
+    //     col D = notes, col E left blank (TransferCore writes
+    //     "Done"/"NOT FOUND" there itself when it runs)
+    const rows = [];
+    const sessions = (allSessionsCache || [])
+      .filter(s => !s.transferred)                                    // never re-include an already-confirmed session
+      .slice()
+      .sort((a, b) => (a.isoDate || "").localeCompare(b.isoDate || "")); // oldest first, just for readability
+
+    sessions.forEach(s => {
+      rows.push(["SESSION", "", isoToDateObj(s.isoDate), s.session, ""]);
+      rows.push(["#", "Member Name", "Amount", "Notes", "Status"]);
+      (s.entries || []).forEach((e, i) => {
+        rows.push([i + 1, e.member, amountForCell(e.amount), e.notes || "", ""]);
+      });
+    });
+
+    if (rows.length === 0) {
+      statusMsg = "Nothing outstanding to export.";
+      render();
+      return;
+    }
+
+    // aoa_to_sheet turns the row arrays into a worksheet; the sheet MUST be
+    // named "Subs Input" — that's the name PushMemberList looks for when it
+    // opens a Subs file, so ProcessTransfer almost certainly expects the
+    // same name. If it turns out to expect something else, this is a
+    // one-word fix.
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Subs Input");
+
+    const today = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `cac_subs_transfer_${today}.xlsx`);
+
+    // Remember which sessions this export covered, then wait for
+    // confirmation before marking anything as transferred — a failed
+    // ProcessTransfer run shouldn't cause data to silently drop off the list.
+    exportedSessionIds = sessions.map(s => s.id);
+    exportConfirmOpen = true;
+    render();
+  }
+
+  /* ============================================================
+     7. START — build the page once when the script first runs.
+     ============================================================ */
+  render();
+
+})();
+</script>
