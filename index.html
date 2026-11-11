@@ -188,193 +188,13 @@
   // "supabase") purely so it can't be confused with that global.
   const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  // Full member list, copied straight from column J of your Extra Session
-  // file. Same list is used for all three tabs. When membership changes,
-  // this array is the one place to edit.
-  const MEMBERS = [
-  // Roster refreshed 2026-11-11 from the club's current member list.
-  "Andrus, Oleksandr",
-  "Banks, Christy",
-  "Barry, James (Shay)",
-  "Barry, Mick",
-  "Barry, Pádraic",
-  "Barry, Sibongile",
-  "Barry, Stephanie",
-  "Bassaler, Magali",
-  "Bassaler, Wulfric (J)",
-  "Behan, Derek",
-  "Bellew, John",
-  "Bradley, Niall Fish",
-  "Brohan-Williams, Michelle",
-  "Burke 2, Joe",
-  "Burke, Dolores",
-  "Burke, Lisa",
-  "Burke, William",
-  "Byrne Kirk, Joanne",
-  "Callaghan, Aideen (J)",
-  "Callaghan, Noleen",
-  "Campbell, Adam",
-  "Carr, Bridget (J)",
-  "Carr, Cella",
-  "Carr, Dominic (J)",
-  "Carr, James (J)",
-  "Casey, Chris",
-  "Casey, Áine",
-  "Chai, Christabel",
-  "Clarke, Adam (J)",
-  "Clarke, Brigid (J)",
-  "Clarke, Mary",
-  "Clarkson, Lisa",
-  "Cleary, Áine",
-  "Clifford, Alexa (J)",
-  "Clifford, Michelle",
-  "Coan, Kate (J)",
-  "Connell, David",
-  "Convery, Alan",
-  "Creedon, Seán",
-  "Cronin, Tony",
-  "Crummy, Seán",
-  "Cummins, Anne",
-  "De Toledo, Giulherme",
-  "Devlin, Roisín (J)",
-  "Diamond, Clíodhna (J)",
-  "Dobbin, Lorraine",
-  "Donnelly, Kevin",
-  "Donnelly, Oisin",
-  "Donovan, Myles (J)",
-  "Dos Santos, Eugene",
-  "Doyle Drenin Sleafer, Eve (J)",
-  "Doyle Drenin Sleafer, Iain",
-  "Doyle Drenin Sleafer, Nicola",
-  "Duffy, Alan",
-  "Eghaghe, Osas",
-  "Fanning, John",
-  "Farrelly, Laura",
-  "Finnegan, Karen",
-  "Fitzpatrick, Philip",
-  "Forde, Brendan",
-  "Gallagher, Derek",
-  "Gallagher, Jordan",
-  "Galushchenko, Victoria",
-  "Gancarz, (Lucaz) AI",
-  "Gancarz, Joanna",
-  "Gancarz, Krystin (J)",
-  "Gancarz, Krzysztof (J)",
-  "García Morán, Lucía",
-  "Gerrard, Jana",
-  "Gerrard, Juliette (J)",
-  "Gilmore, Peter",
-  "Gorman, Tommy",
-  "Graham, Jason",
-  "Graham, Leah (J)",
-  "Graham, Richelle",
-  "Gregory, Anthony",
-  "Hamad, Mohammed",
-  "Harrison, Briege",
-  "Hayes, Melissa",
-  "Heinz, Claudia",
-  "Irbe, Sintija",
-  "Judge, Fiachra",
-  "Judge, Leon (J)",
-  "Keeble, Neil",
-  "Keeble, Siobhán",
-  "Keirns, Heather (J)",
-  "Kirkwood, Tadhg (J)",
-  "Kovalenko, Anastasiia",
-  "Lamb, Catherine",
-  "Lamb, Daniel",
-  "Laramie, Eamonn",
-  "Larkin, Gerard",
-  "Lebanese, Richard",
-  "Leech, Caroline",
-  "Lynch, Patrick",
-  "Lynch, Piaras",
-  "MacArtain, Laura",
-  "MacArtain, Niall (J)",
-  "MacCriostail, Conn (J)",
-  "Markey, Thomas (J)",
-  "Martin, Seán",
-  "McCabe, Philip",
-  "McCann, Aoife (J)",
-  "McCann, Nichola",
-  "McCarthy, Orlaith",
-  "McClelland, Gilbert",
-  "McCooey, Paul",
-  "McDonnell, Jane",
-  "McGee, Aoife",
-  "McGlynn, David",
-  "McKenna, Leanne (J)",
-  "McKenna, Tomas",
-  "McLoughlin, Amy",
-  "McLoughlin, Dave",
-  "McManus, Avril (J)",
-  "McShane (DKIT), Stephen",
-  "McShane, Ché",
-  "McShane, Ché (J)",
-  "McShane, James",
-  "Moloney, James",
-  "Morgan, Declan",
-  "Morgan, Milo (J)",
-  "Morgan, Sybbi-Rose (J)",
-  "Mullins, Brendan",
-  "Mullooly, Michael",
-  "Murphy, Anna (J)",
-  "Murray, Ann Marie",
-  "Murtagh, Ellen",
-  "Navarro, Kevin",
-  "Ni Dhuinn, Coblaith",
-  "Norris, Tamlyn",
-  "Nugent, Alan",
-  "Nugent, Evan (J)",
-  "Nugent, Luke (J)",
-  "NíChristail, Rosie (J)",
-  "O'Connor, AnnMarie",
-  "O'Donnell, Roseanne",
-  "O'Keane Egan, Ardyn",
-  "O'Keane Egan, Carolyn",
-  "O'Keefe, Aibhlín (J)",
-  "O'Rourke, Aideen",
-  "Philips, Catherine",
-  "Philips, Chloe (J)",
-  "Power, Catherine",
-  "Quaile, Adrian",
-  "Quinn, Adria",
-  "Quinn, Gerard (J)",
-  "Ralph, Arán",
-  "Reilly, Rhys (J)",
-  "Reynolds, Arwen (J)",
-  "Reynolds, Jason",
-  "Reynolds, Niall",
-  "Ribeiro-O'Mahony, Hellen",
-  "Ribeiro-O'Mahony, Rob",
-  "Rock, James",
-  "Roden, Kevin",
-  "Rogers, Christina",
-  "Rogers, Deirdre",
-  "Rogers, Eamonn",
-  "Rogers, Gillian (J)",
-  "Rossborough, Michael",
-  "Ruddy, Aidan",
-  "Ruddy, Danielle",
-  "Ryan, Alan",
-  "Scarpellini, Camila",
-  "Sheridan, David",
-  "Skelton, Michael",
-  "Tait, Andy",
-  "Tormey, Carl",
-  "Tormey, Warrick (J)",
-  "Torres-Kerrigan, Odin",
-  "Traynor, Ronan",
-  "Traynor, Rory (J)",
-  "Varghese, Ginu",
-  "Vaughey, Leanne",
-  "Ward, Terrence",
-  "Wilson, Darrel",
-  "Woods, Saoirse",
-  "Wright, Lorraine",
-  "Young, Mark",
-  "Young, Rudhrai (J)"
-];
+// MEMBERS now starts empty and is filled in at startup by loadMembers()
+// below, which reads the live roster straight from the Supabase
+// "members" table instead of this file carrying a frozen list.
+// Updating the roster is now just a database change (Excel's
+// "Update Web Roster" / Push Member List flow) — no more editing this
+// file and redeploying every time someone joins or leaves.
+let MEMBERS = [];
 
   /* ============================================================
      2. APP STATE — plain variables holding "what's on screen right now".
@@ -391,6 +211,7 @@
   let amountValue = "";           // free-typed amount
   let amountChip = "";            // "0" or ":" if a quick-chip was tapped instead
   let notesValue = "";
+  let membersLoading = true;      // true until the roster fetch from Supabase finishes
   let entries = [];               // entries already saved for the CURRENT tab+date
   let currentSessionId = null;    // the sessions-table row ID for the CURRENT tab+date, once it exists
   let reviewOpen = false;         // whether the "all sessions" review panel is showing
@@ -1144,9 +965,33 @@
   }
 
   /* ============================================================
-     7. START — build the page once when the script first runs.
+     6b. LOAD MEMBERS — fetch the live roster from Supabase at startup,
+     instead of relying on a frozen list baked into this file. If the
+     fetch fails (no signal, Supabase down), MEMBERS just stays empty
+     and a message explains why, rather than the page crashing.
      ============================================================ */
-  render();
+  async function loadMembers() {
+    const { data, error } = await sb
+      .from("members")
+      .select("display_name")
+      .order("display_name");   // alphabetical, regardless of how the table itself stores rows
+
+    if (error) {
+      console.error("Could not load members:", error);
+      statusMsg = "Couldn't load the member list — check your connection and reload.";
+    } else {
+      MEMBERS = data.map(row => row.display_name);
+    }
+    membersLoading = false;
+    render();   // re-paint now that MEMBERS (or the error) is known
+  }
+
+  /* ============================================================
+     7. START — build the page once when the script first runs,
+     then kick off loading the live member roster from Supabase.
+     ============================================================ */
+  render();        // paint immediately with whatever state we already have
+  loadMembers();   // fetch the roster; this re-renders itself once done
 
 })();
 </script>
