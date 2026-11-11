@@ -1,3 +1,13 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- This is the actual fix: tells the phone to render the page at its
+       own real screen width (device-width) and start at normal 100%
+       zoom, instead of assuming a wide desktop screen and shrinking
+       everything down to fit — which is the "tiny until zoomed" bug. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CAC Subs Collector</title>
 <!-- SheetJS — lets the browser build a real .xlsx file, not just a CSV. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
@@ -17,6 +27,8 @@
   the saved entries, which go to the club's own Supabase database so all
   three collectors (and you) see the same list.
 -->
+</head>
+<body>
 <div id="app"></div>
 
 <style>
@@ -955,3 +967,5 @@
 
 })();
 </script>
+</body>
+</html>
