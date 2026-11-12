@@ -153,6 +153,10 @@
   .muted { color: #8A7A6A; font-size: 0.85rem; }
   .banner { background: #FFF9E6; border: 1px solid #E8D98C; border-radius: 8px; padding: 10px; font-size: 0.82rem; margin-bottom: 14px; }
   .status-msg { font-size: 0.82rem; text-align: center; padding: 6px; color: #8A7A6A; }
+  input[type=password] { width: 100%; font-size: 1rem; padding: 10px; border: 1px solid #D8CDBC; border-radius: 8px; background: #FFFDF9; } /* password box: same look as the text boxes */
+  input:disabled, input[readonly] { background: #F0E9DD; color: #5C4A3D; } /* greyed look for boxes a collector can't change */
+  .whoami { display: flex; justify-content: space-between; font-size: 0.8rem; padding-bottom: 8px; } /* "Signed in as … / Sign out" line in the header */
+  .whoami a { color: #fff; text-decoration: underline; cursor: pointer; } /* the Sign out link */
 </style>
 
 <script>
@@ -187,6 +191,14 @@
   // we'll use for every read/write from here on. Named "sb" (not
   // "supabase") purely so it can't be confused with that global.
   const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  // Logins are Supabase email+password accounts, but volunteers only ever
+  // type their member ID. The app glues this ending on to make the email,
+  // e.g. "5004" -> "5004@collectors.invalid". ".invalid" is a reserved
+  // ending that never delivers mail. Must match the emails you create in
+  // the Supabase dashboard; change it here (one place) if you ever use
+  // a real club domain instead.
+  const LOGIN_EMAIL_DOMAIN = "@collectors.invalid";
 
 // MEMBERS now starts empty and is filled in at startup by loadMembers()
 // below, which reads the live roster straight from the Supabase
@@ -223,6 +235,13 @@ let MEMBERS = [];
   let clearHistoryPinOpen = false; // PIN entry for wiping already-transferred history
   let clearHistoryPinValue = "";
   let statusMsg = "";             // small text feedback line ("Saved.", "Loading…", etc.)
+  let authChecked = false;        // false until we've asked Supabase "is this phone already signed in?"
+  let signedIn = false;           // true once a login is active on this phone
+  let myRole = null;              // "collector" / "treasurer" from the staff table; null = no access
+  let myName = "";                // the signed-in person's roster name, e.g. "Barry, Shay"
+  let loginId = "";               // what's typed in the Member ID box on the sign-in screen
+  let loginPw = "";               // what's typed in the Password box
+  let loginMsg = "";              // feedback on the sign-in screen ("Signing in…", "Wrong ID or password.")
 
   /* ============================================================
      3. STORAGE HELPERS
@@ -461,8 +480,47 @@ let MEMBERS = [];
     }, 0);
   }
 
+  function renderAuthScreen(app) {
+    // Draws the screen shown BEFORE the main app: a "checking" line, the
+    // sign-in form, or a "no access" message. Returns true if it drew
+    // something (so render() stops there), false if the main app should show.
+    const header = `<div class="header"><h1>Cúchulainn AC — Subs Collector</h1></div>`;  // same red bar, no tabs
+    if (!authChecked) {                                   // still asking Supabase about an existing login
+      app.innerHTML = `${header}<div class="section"><div class="status-msg">Loading…</div></div>`;
+      return true;
+    }
+    if (!signedIn) {                                      // nobody signed in on this phone: show the form
+      app.innerHTML = `${header}
+        <div class="section"><div class="card">
+          <label>Member ID</label>
+          <input type="text" id="loginId" value="${loginId}" inputmode="numeric" autocomplete="username" placeholder="e.g. 5004" />
+          <label>Password</label>
+          <input type="password" id="loginPw" value="${loginPw}" autocomplete="current-password" />
+          <button class="primary" id="loginBtn">Sign in</button>
+          <div class="status-msg">${loginMsg}</div>
+        </div></div>`;
+      document.getElementById("loginId").oninput = e => { loginId = e.target.value; };   // remember typing without redrawing
+      document.getElementById("loginPw").oninput = e => { loginPw = e.target.value; };   // same for the password
+      document.getElementById("loginPw").onkeydown = e => { if (e.key === "Enter") signIn(); };  // Enter key = tap Sign in
+      document.getElementById("loginBtn").onclick = signIn;                               // the button itself
+      return true;
+    }
+    if (myRole !== "collector" && myRole !== "treasurer") {  // signed in, but not on the staff list (or is the workbook login)
+      app.innerHTML = `${header}
+        <div class="section"><div class="card">
+          <div class="muted">This login has no access to the collector app. Ask the treasurer.</div>
+          <button class="secondary" id="signOutBtn">Sign out</button>
+        </div></div>`;
+      document.getElementById("signOutBtn").onclick = signOut;  // let them get back to the sign-in form
+      return true;
+    }
+    return false;                                         // signed in with a real role: carry on to the main app
+  }
+
   function render() {
     const app = document.getElementById("app");
+    if (renderAuthScreen(app)) return;   // sign-in / no-access screens take over until a proper login is active
+    const isTreasurer = myRole === "treasurer";   // shorthand used below to show/hide treasurer-only parts
 
     const tabsHtml = SESSIONS.map(s =>
       `<div class="tab ${s === currentTab ? 'active' : ''}" data-tab="${s}">${s}</div>`
@@ -552,6 +610,7 @@ let MEMBERS = [];
     app.innerHTML = `
       <div class="header">
         <h1>Cúchulainn AC — Subs Collector</h1>
+        <div class="whoami"><span>${myName || "Signed in"} (${myRole})</span><a id="signOutBtn">Sign out</a></div>
         <div class="tabs">${tabsHtml}</div>
       </div>
       <div class="section">
@@ -559,10 +618,11 @@ let MEMBERS = [];
 
         <div class="card">
           <label>Collected by</label>
-          <input type="text" id="collectorInput" value="${collectorName}" placeholder="Your name" />
+          <input type="text" id="collectorInput" value="${collectorName}" placeholder="Your name" ${isTreasurer ? "" : "readonly"} />
 
           <label>Session date</label>
-          <input type="date" id="dateInput" value="${sessionDate}" />
+          <input type="date" id="dateInput" value="${sessionDate}" ${isTreasurer ? "" : "disabled"} />
+          ${isTreasurer ? "" : `<div class="muted" style="margin-top:4px;">Collectors can only log today's session.</div>`}
           ${dateWarning ? `<div class="banner" style="margin-top:8px; margin-bottom:0;">${dateWarning}</div>` : ""}
         </div>
 
@@ -591,8 +651,8 @@ let MEMBERS = [];
           <div class="total-line"><span>Total this session</span><span>€${total.toFixed(2)}</span></div>
         </div>
 
-        <button class="secondary" id="reviewToggle">${reviewOpen ? "Hide all sessions" : "Review all sessions"}</button>
-        ${reviewHtml}
+        ${isTreasurer ? `<button class="secondary" id="reviewToggle">${reviewOpen ? "Hide all sessions" : "Review all sessions"}</button>` : ""}
+        ${isTreasurer ? reviewHtml : ""}
       </div>
     `;
 
@@ -668,7 +728,10 @@ let MEMBERS = [];
       el.onclick = () => removeEntry(parseInt(el.dataset.del, 10));
     });
 
-    document.getElementById("reviewToggle").onclick = async () => {
+    document.getElementById("signOutBtn").onclick = signOut;   // header "Sign out" link
+
+    const reviewToggle = document.getElementById("reviewToggle");  // only exists for the treasurer
+    if (reviewToggle) reviewToggle.onclick = async () => {        // so only wire it up when it's there
       reviewOpen = !reviewOpen;
       // Re-fetch every time Review is OPENED, not just the first time —
       // otherwise this screen can show a stale snapshot from earlier in
@@ -987,11 +1050,103 @@ let MEMBERS = [];
   }
 
   /* ============================================================
-     7. START — build the page once when the script first runs,
-     then kick off loading the live member roster from Supabase.
+     7. START — check for a saved login, then show either the sign-in
+     form or the app (which then loads the roster and today's session).
      ============================================================ */
-  render();        // paint immediately with whatever state we already have
-  loadMembers();   // fetch the roster; this re-renders itself once done
+  function todayIso() {
+    // Today's date on this phone as yyyy-mm-dd (what the date box uses).
+    // Built from local year/month/day, NOT toISOString(), which is UTC and
+    // would give yesterday's date just after midnight in Irish summer time.
+    const d = new Date();                                    // right now, phone's clock
+    const mm = String(d.getMonth() + 1).padStart(2, "0");    // month 1-12, two digits
+    const dd = String(d.getDate()).padStart(2, "0");         // day, two digits
+    return `${d.getFullYear()}-${mm}-${dd}`;                 // e.g. "2026-11-17"
+  }
+
+  function tabForToday() {
+    // Opens the tab matching today: Tuesday -> Tuesday, Saturday -> Saturday,
+    // any other day -> Extra. Saves a tap and avoids the weekday warning.
+    const day = new Date().getDay();                         // 0 = Sunday ... 6 = Saturday
+    if (day === 2) return "Tuesday";
+    if (day === 6) return "Saturday";
+    return "Extra";
+  }
+
+  async function afterSignIn() {
+    // Runs once a login is active: asks the database "who am I?", then
+    // loads the roster and today's session. The database decides the
+    // role (staff table) — the app only uses it to show/hide buttons.
+    const { data, error } = await sb.rpc("whoami");          // calls the whoami() function from the SQL
+    const me = (!error && data && data[0]) ? data[0] : null; // first (only) row, or null if not on staff
+    myRole = me ? me.role : null;                            // "collector" / "treasurer" / "workbook" / null
+    myName = me && me.display_name ? me.display_name : "";   // roster name, if any
+    authChecked = true;                                      // we now know where we stand
+    if (myRole !== "collector" && myRole !== "treasurer") {  // no app access: render() shows the message
+      render();
+      return;
+    }
+    collectorName = myName;                                  // "Collected by" filled in automatically
+    sessionDate = todayIso();                                // start on today's date
+    currentTab = tabForToday();                              // and the matching tab
+    await loadMembers();                                     // roster for the member picker
+    await refreshEntries();                                  // today's entries so far (and re-draws)
+  }
+
+  async function signIn() {
+    const id = loginId.trim();                               // ignore stray spaces around the ID
+    if (!id || !loginPw) {                                   // both boxes needed
+      loginMsg = "Enter your member ID and password.";
+      render();
+      return;
+    }
+    loginMsg = "Signing in…";
+    render();
+    const { error } = await sb.auth.signInWithPassword({     // Supabase checks the password
+      email: id + LOGIN_EMAIL_DOMAIN,                        // "5004" -> "5004@collectors.invalid"
+      password: loginPw
+    });
+    if (error) {                                             // wrong ID/password, or no signal
+      loginMsg = "Sign-in failed — check your ID and password.";
+      loginPw = "";                                          // clear the password box
+      render();
+      return;
+    }
+    signedIn = true;                                         // the phone now remembers this login
+    loginPw = "";                                            // never keep the password in memory longer than needed
+    loginMsg = "";
+    await afterSignIn();
+  }
+
+  async function signOut() {
+    await sb.auth.signOut();                                 // forget the login on this phone
+    signedIn = false;                                        // back to the sign-in screen...
+    myRole = null;                                           // ...with everything personal cleared
+    myName = "";
+    collectorName = "";
+    entries = [];
+    currentSessionId = null;
+    allSessionsCache = null;
+    reviewOpen = false;
+    MEMBERS = [];
+    statusMsg = "";
+    render();
+  }
+
+  async function startApp() {
+    // supabase-js keeps a login in the phone's storage between visits and
+    // renews it in the background, so volunteers sign in once, not every time.
+    render();                                                // show "Loading…" straight away
+    const { data } = await sb.auth.getSession();             // is there a saved login on this phone?
+    if (data && data.session) {                              // yes: skip the form
+      signedIn = true;
+      await afterSignIn();
+    } else {                                                 // no: show the sign-in form
+      authChecked = true;
+      render();
+    }
+  }
+
+  startApp();      // everything starts here
 
 })();
 </script>
