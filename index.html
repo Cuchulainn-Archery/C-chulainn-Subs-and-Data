@@ -237,7 +237,7 @@ let MEMBERS = [];
   let statusMsg = "";             // small text feedback line ("Saved.", "Loading…", etc.)
   let authChecked = false;        // false until we've asked Supabase "is this phone already signed in?"
   let signedIn = false;           // true once a login is active on this phone
-  let myRole = null;              // "collector" / "treasurer" from the staff table; null = no access
+  let myRole = null;              // "collector" / "admin" from the staff table; null = no access
   let myName = "";                // the signed-in person's roster name, e.g. "Barry, Shay"
   let loginId = "";               // what's typed in the Member ID box on the sign-in screen
   let loginPw = "";               // what's typed in the Password box
@@ -505,10 +505,10 @@ let MEMBERS = [];
       document.getElementById("loginBtn").onclick = signIn;                               // the button itself
       return true;
     }
-    if (myRole !== "collector" && myRole !== "treasurer") {  // signed in, but not on the staff list (or is the workbook login)
+    if (myRole !== "collector" && myRole !== "admin") {  // signed in, but not on the staff list (or is the workbook login)
       app.innerHTML = `${header}
         <div class="section"><div class="card">
-          <div class="muted">This login has no access to the collector app. Ask the treasurer.</div>
+          <div class="muted">This login has no access to the collector app. Ask an admin.</div>
           <button class="secondary" id="signOutBtn">Sign out</button>
         </div></div>`;
       document.getElementById("signOutBtn").onclick = signOut;  // let them get back to the sign-in form
@@ -520,7 +520,7 @@ let MEMBERS = [];
   function render() {
     const app = document.getElementById("app");
     if (renderAuthScreen(app)) return;   // sign-in / no-access screens take over until a proper login is active
-    const isTreasurer = myRole === "treasurer";   // shorthand used below to show/hide treasurer-only parts
+    const isAdmin = myRole === "admin";   // shorthand used below to show/hide admin-only parts
 
     const tabsHtml = SESSIONS.map(s =>
       `<div class="tab ${s === currentTab ? 'active' : ''}" data-tab="${s}">${s}</div>`
@@ -618,11 +618,11 @@ let MEMBERS = [];
 
         <div class="card">
           <label>Collected by</label>
-          <input type="text" id="collectorInput" value="${collectorName}" placeholder="Your name" ${isTreasurer ? "" : "readonly"} />
+          <input type="text" id="collectorInput" value="${collectorName}" placeholder="Your name" ${isAdmin ? "" : "readonly"} />
 
           <label>Session date</label>
-          <input type="date" id="dateInput" value="${sessionDate}" ${isTreasurer ? "" : "disabled"} />
-          ${isTreasurer ? "" : `<div class="muted" style="margin-top:4px;">Collectors can only log today's session.</div>`}
+          <input type="date" id="dateInput" value="${sessionDate}" ${isAdmin ? "" : "disabled"} />
+          ${isAdmin ? "" : `<div class="muted" style="margin-top:4px;">Collectors can only log today's session.</div>`}
           ${dateWarning ? `<div class="banner" style="margin-top:8px; margin-bottom:0;">${dateWarning}</div>` : ""}
         </div>
 
@@ -651,8 +651,8 @@ let MEMBERS = [];
           <div class="total-line"><span>Total this session</span><span>€${total.toFixed(2)}</span></div>
         </div>
 
-        ${isTreasurer ? `<button class="secondary" id="reviewToggle">${reviewOpen ? "Hide all sessions" : "Review all sessions"}</button>` : ""}
-        ${isTreasurer ? reviewHtml : ""}
+        ${isAdmin ? `<button class="secondary" id="reviewToggle">${reviewOpen ? "Hide all sessions" : "Review all sessions"}</button>` : ""}
+        ${isAdmin ? reviewHtml : ""}
       </div>
     `;
 
@@ -730,7 +730,7 @@ let MEMBERS = [];
 
     document.getElementById("signOutBtn").onclick = signOut;   // header "Sign out" link
 
-    const reviewToggle = document.getElementById("reviewToggle");  // only exists for the treasurer
+    const reviewToggle = document.getElementById("reviewToggle");  // only exists for admins
     if (reviewToggle) reviewToggle.onclick = async () => {        // so only wire it up when it's there
       reviewOpen = !reviewOpen;
       // Re-fetch every time Review is OPENED, not just the first time —
@@ -1078,10 +1078,10 @@ let MEMBERS = [];
     // role (staff table) — the app only uses it to show/hide buttons.
     const { data, error } = await sb.rpc("whoami");          // calls the whoami() function from the SQL
     const me = (!error && data && data[0]) ? data[0] : null; // first (only) row, or null if not on staff
-    myRole = me ? me.role : null;                            // "collector" / "treasurer" / "workbook" / null
+    myRole = me ? me.role : null;                            // "collector" / "admin" / "workbook" / null
     myName = me && me.display_name ? me.display_name : "";   // roster name, if any
     authChecked = true;                                      // we now know where we stand
-    if (myRole !== "collector" && myRole !== "treasurer") {  // no app access: render() shows the message
+    if (myRole !== "collector" && myRole !== "admin") {  // no app access: render() shows the message
       render();
       return;
     }

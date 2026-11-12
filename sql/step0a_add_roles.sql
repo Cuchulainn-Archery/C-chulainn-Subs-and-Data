@@ -13,7 +13,7 @@ create table if not exists public.staff (                 -- one row per login a
             references auth.users(id) on delete cascade,  -- deleting the login removes its staff row too
   member_id integer not null,                             -- their CAC member ID (e.g. 5004)
   role      text not null                                 -- what they may do:
-            check (role in ('collector','treasurer','workbook'))  -- only these three values allowed
+            check (role in ('collector','admin','workbook'))  -- only these three values allowed
 );
 alter table public.staff enable row level security;       -- switch on the rules for this table...
 -- ...and add NO policies: with rules on and none granted, no phone and no
@@ -26,7 +26,7 @@ language sql stable                                       -- same answer within 
 as $$ select (now() at time zone 'Europe/Dublin')::date $$;  -- server clock converted to Dublin, then cut to a date
 
 -- ---------- 3. Helper: does the signed-in login have one of these roles? ----------
-create or replace function public.has_role(variadic wanted text[])  -- e.g. has_role('treasurer') or has_role('collector','treasurer')
+create or replace function public.has_role(variadic wanted text[])  -- e.g. has_role('admin') or has_role('collector','admin')
 returns boolean                                           -- true / false
 language sql stable                                       -- same answer within one request
 security definer                                          -- runs with owner rights, so it CAN read staff (callers can't)
@@ -63,31 +63,31 @@ grant  execute on function public.dublin_today()    to authenticated;   -- signe
 -- ---------- 6. SESSIONS rules for signed-in users ----------
 create policy "staff read sessions" on public.sessions    -- who can SEE session rows
   for select to authenticated
-  using ( has_role('treasurer')                           -- treasurer sees everything
+  using ( has_role('admin')                           -- admin sees everything
           or ( has_role('collector')                      -- a collector sees only...
                and session_date = dublin_today()          -- ...today's sessions...
                and transferred is not true ) );           -- ...that haven't been exported
 
 create policy "staff create sessions" on public.sessions  -- who can START a session-day
   for insert to authenticated
-  with check ( has_role('treasurer')                      -- treasurer: any date
+  with check ( has_role('admin')                      -- admin: any date
                or ( has_role('collector')                 -- collector: only...
                     and session_date = dublin_today()     -- ...for today...
                     and transferred is not true ) );      -- ...and not pre-marked as exported
 
-create policy "treasurer updates sessions" on public.sessions  -- marking "transferred"
+create policy "admin updates sessions" on public.sessions  -- marking "transferred"
   for update to authenticated
-  using ( has_role('treasurer') )                         -- only the treasurer may change a row...
-  with check ( has_role('treasurer') );                   -- ...and the changed row must still pass
+  using ( has_role('admin') )                         -- only an admin may change a row...
+  with check ( has_role('admin') );                   -- ...and the changed row must still pass
 
-create policy "treasurer deletes sessions" on public.sessions  -- "Clear transferred history"
+create policy "admin deletes sessions" on public.sessions  -- "Clear transferred history"
   for delete to authenticated
-  using ( has_role('treasurer') );                        -- only the treasurer
+  using ( has_role('admin') );                        -- only an admin
 
 -- ---------- 7. ENTRIES rules for signed-in users (still no update, by design) ----------
 create policy "staff read entries" on public.entries      -- who can SEE entries
   for select to authenticated
-  using ( has_role('treasurer')                           -- treasurer sees everything
+  using ( has_role('admin')                           -- admin sees everything
           or ( has_role('collector')                      -- a collector sees an entry only if...
                and exists ( select 1 from public.sessions s     -- ...its session...
                             where s.id = entries.session_id     -- (the one this entry belongs to)
@@ -96,7 +96,7 @@ create policy "staff read entries" on public.entries      -- who can SEE entries
 
 create policy "staff add entries" on public.entries       -- who can ADD entries
   for insert to authenticated
-  with check ( has_role('treasurer')                      -- treasurer: into any session
+  with check ( has_role('admin')                      -- admin: into any session
                or ( has_role('collector')                 -- collector: only into today's open session
                     and exists ( select 1 from public.sessions s
                                  where s.id = entries.session_id
@@ -105,7 +105,7 @@ create policy "staff add entries" on public.entries       -- who can ADD entries
 
 create policy "staff remove entries" on public.entries    -- who can DELETE entries ("remove" link)
   for delete to authenticated
-  using ( has_role('treasurer')                           -- treasurer: any
+  using ( has_role('admin')                           -- admin: any
           or ( has_role('collector')                      -- collector: only in today's open session
                and exists ( select 1 from public.sessions s
                             where s.id = entries.session_id
@@ -115,7 +115,7 @@ create policy "staff remove entries" on public.entries    -- who can DELETE entr
 -- ---------- 8. MEMBERS rules for signed-in users (still no delete, by design) ----------
 create policy "staff read members" on public.members      -- the name list for the member picker
   for select to authenticated
-  using ( has_role('collector','treasurer','workbook') ); -- workbook needs it too: an "upsert" checks existing rows
+  using ( has_role('collector','admin','workbook') ); -- workbook needs it too: an "upsert" checks existing rows
 
 create policy "workbook adds members" on public.members   -- PushMembersToWeb: new member_id
   for insert to authenticated

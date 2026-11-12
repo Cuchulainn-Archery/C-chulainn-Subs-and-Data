@@ -2,7 +2,7 @@
 -- STEP 0, PART B — CUTOVER. Removes every "anon can ..." rule, so the
 -- public key on its own can no longer read or change anything.
 -- Run ONLY when all of these are true:
---   1. The test branch page has passed testing (signed in as collector AND treasurer).
+--   1. The test branch page has passed testing (signed in as collector AND admin).
 --   2. The branch has been merged, so the live page has the sign-in screen.
 --   3. PushMembersToWeb has been changed to sign in as the workbook login, and tested.
 -- After this, the OLD page (on any phone that hasn't reloaded) will show load/save errors
