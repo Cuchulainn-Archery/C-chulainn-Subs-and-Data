@@ -567,7 +567,7 @@ let MEMBERS = [];
         let actionHtml = "";
         if (exportConfirmOpen) {
           actionHtml = `
-            <div class="banner">File downloaded. Only tap "Confirm" below once ProcessTransfer + cleanup has actually succeeded in Excel for this file — that's what stops these entries being exported again.</div>
+            <div class="banner">Check the file has actually saved (in Edge: Ctrl+J). Only tap "Confirm" below once ProcessTransfer + cleanup has actually succeeded in Excel for this file — that's what stops these entries being exported again. No file? Tap "Not yet" and export again.</div>
             <button class="primary" id="confirmTransferred">Confirm — it landed in DAILY</button>
             <button class="secondary" id="cancelTransferConfirm">Not yet / it failed — keep for re-export</button>
           `;
