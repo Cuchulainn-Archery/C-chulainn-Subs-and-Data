@@ -4,7 +4,8 @@
 -- changes any "anon can ..." policy, so the live page keeps working.
 -- The new rules apply only to people who are SIGNED IN (role
 -- "authenticated"), which only the test branch page does.
--- Run once, in Supabase > SQL Editor. Contains no secrets.
+-- Run in Supabase > SQL Editor. Safe to run again if a run fails part-way.
+-- Contains no secrets.
 -- =====================================================================
 
 -- ---------- 1. The staff list: which login has which role ----------
@@ -15,6 +16,9 @@ create table if not exists public.staff (                 -- one row per login a
   role      text not null                                 -- what they may do:
             check (role in ('collector','admin','workbook'))  -- only these three values allowed
 );
+alter table public.staff drop constraint if exists staff_role_check;   -- if an earlier run made the table with old role names...
+alter table public.staff add constraint staff_role_check               -- ...put back the current list of allowed roles
+  check (role in ('collector','admin','workbook'));
 alter table public.staff enable row level security;       -- switch on the rules for this table...
 -- ...and add NO policies: with rules on and none granted, no phone and no
 -- public key can read or change staff. Only you, in the dashboard, can.
@@ -61,6 +65,7 @@ grant  execute on function public.whoami()          to authenticated;   -- signe
 grant  execute on function public.dublin_today()    to authenticated;   -- signed-in users can
 
 -- ---------- 6. SESSIONS rules for signed-in users ----------
+drop policy if exists "staff read sessions" on public.sessions;  -- remove first if an earlier run made it, so re-running is safe
 create policy "staff read sessions" on public.sessions    -- who can SEE session rows
   for select to authenticated
   using ( has_role('admin')                           -- admin sees everything
@@ -68,6 +73,7 @@ create policy "staff read sessions" on public.sessions    -- who can SEE session
                and session_date = dublin_today()          -- ...today's sessions...
                and transferred is not true ) );           -- ...that haven't been exported
 
+drop policy if exists "staff create sessions" on public.sessions;  -- remove first if an earlier run made it, so re-running is safe
 create policy "staff create sessions" on public.sessions  -- who can START a session-day
   for insert to authenticated
   with check ( has_role('admin')                      -- admin: any date
@@ -75,16 +81,19 @@ create policy "staff create sessions" on public.sessions  -- who can START a ses
                     and session_date = dublin_today()     -- ...for today...
                     and transferred is not true ) );      -- ...and not pre-marked as exported
 
+drop policy if exists "admin updates sessions" on public.sessions;  -- remove first if an earlier run made it, so re-running is safe
 create policy "admin updates sessions" on public.sessions  -- marking "transferred"
   for update to authenticated
   using ( has_role('admin') )                         -- only an admin may change a row...
   with check ( has_role('admin') );                   -- ...and the changed row must still pass
 
+drop policy if exists "admin deletes sessions" on public.sessions;  -- remove first if an earlier run made it, so re-running is safe
 create policy "admin deletes sessions" on public.sessions  -- "Clear transferred history"
   for delete to authenticated
   using ( has_role('admin') );                        -- only an admin
 
 -- ---------- 7. ENTRIES rules for signed-in users (still no update, by design) ----------
+drop policy if exists "staff read entries" on public.entries;  -- remove first if an earlier run made it, so re-running is safe
 create policy "staff read entries" on public.entries      -- who can SEE entries
   for select to authenticated
   using ( has_role('admin')                           -- admin sees everything
@@ -94,6 +103,7 @@ create policy "staff read entries" on public.entries      -- who can SEE entries
                               and s.session_date = dublin_today()  -- ...is today's...
                               and s.transferred is not true ) ) ); -- ...and not yet exported
 
+drop policy if exists "staff add entries" on public.entries;  -- remove first if an earlier run made it, so re-running is safe
 create policy "staff add entries" on public.entries       -- who can ADD entries
   for insert to authenticated
   with check ( has_role('admin')                      -- admin: into any session
@@ -103,6 +113,7 @@ create policy "staff add entries" on public.entries       -- who can ADD entries
                                    and s.session_date = dublin_today()
                                    and s.transferred is not true ) ) );
 
+drop policy if exists "staff remove entries" on public.entries;  -- remove first if an earlier run made it, so re-running is safe
 create policy "staff remove entries" on public.entries    -- who can DELETE entries ("remove" link)
   for delete to authenticated
   using ( has_role('admin')                           -- admin: any
@@ -113,14 +124,17 @@ create policy "staff remove entries" on public.entries    -- who can DELETE entr
                               and s.transferred is not true ) ) );
 
 -- ---------- 8. MEMBERS rules for signed-in users (still no delete, by design) ----------
+drop policy if exists "staff read members" on public.members;  -- remove first if an earlier run made it, so re-running is safe
 create policy "staff read members" on public.members      -- the name list for the member picker
   for select to authenticated
   using ( has_role('collector','admin','workbook') ); -- workbook needs it too: an "upsert" checks existing rows
 
+drop policy if exists "workbook adds members" on public.members;  -- remove first if an earlier run made it, so re-running is safe
 create policy "workbook adds members" on public.members   -- PushMembersToWeb: new member_id
   for insert to authenticated
   with check ( has_role('workbook') );                    -- only the workbook login
 
+drop policy if exists "workbook updates members" on public.members;  -- remove first if an earlier run made it, so re-running is safe
 create policy "workbook updates members" on public.members  -- PushMembersToWeb: name change
   for update to authenticated
   using ( has_role('workbook') )                          -- only the workbook login may change a row...
