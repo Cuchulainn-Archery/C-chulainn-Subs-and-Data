@@ -64,6 +64,15 @@ grant  execute on function public.has_role(text[]) to authenticated;    -- signe
 grant  execute on function public.whoami()          to authenticated;   -- signed-in users can
 grant  execute on function public.dublin_today()    to authenticated;   -- signed-in users can
 
+-- ---------- 5b. "Who really saved this row" — filled by the database, not the app ----------
+alter table public.sessions add column if not exists created_by uuid   -- the login that started this session-day
+  default auth.uid()                                      -- database fills it in from the signed-in login
+  references auth.users(id) on delete set null;           -- deleting a login keeps the row, just blanks this
+alter table public.entries  add column if not exists created_by uuid   -- the login that saved this entry
+  default auth.uid()                                      -- database fills it in from the signed-in login
+  references auth.users(id) on delete set null;           -- deleting a login keeps the row, just blanks this
+-- Rows saved by the old (anon) page get an empty created_by: there's no login to record.
+
 -- ---------- 6. SESSIONS rules for signed-in users ----------
 drop policy if exists "staff read sessions" on public.sessions;  -- remove first if an earlier run made it, so re-running is safe
 create policy "staff read sessions" on public.sessions    -- who can SEE session rows
@@ -76,10 +85,11 @@ create policy "staff read sessions" on public.sessions    -- who can SEE session
 drop policy if exists "staff create sessions" on public.sessions;  -- remove first if an earlier run made it, so re-running is safe
 create policy "staff create sessions" on public.sessions  -- who can START a session-day
   for insert to authenticated
-  with check ( has_role('admin')                      -- admin: any date
-               or ( has_role('collector')                 -- collector: only...
-                    and session_date = dublin_today()     -- ...for today...
-                    and transferred is not true ) );      -- ...and not pre-marked as exported
+  with check ( created_by = auth.uid()                    -- everyone: can't claim to be another login
+               and ( has_role('admin')                    -- admin: any date
+                     or ( has_role('collector')           -- collector: only...
+                          and session_date = dublin_today()   -- ...for today...
+                          and transferred is not true ) ) );  -- ...and not pre-marked as exported
 
 drop policy if exists "admin updates sessions" on public.sessions;  -- remove first if an earlier run made it, so re-running is safe
 create policy "admin updates sessions" on public.sessions  -- marking "transferred"
@@ -106,12 +116,13 @@ create policy "staff read entries" on public.entries      -- who can SEE entries
 drop policy if exists "staff add entries" on public.entries;  -- remove first if an earlier run made it, so re-running is safe
 create policy "staff add entries" on public.entries       -- who can ADD entries
   for insert to authenticated
-  with check ( has_role('admin')                      -- admin: into any session
-               or ( has_role('collector')                 -- collector: only into today's open session
-                    and exists ( select 1 from public.sessions s
-                                 where s.id = entries.session_id
-                                   and s.session_date = dublin_today()
-                                   and s.transferred is not true ) ) );
+  with check ( created_by = auth.uid()                    -- everyone: can't claim to be another login
+               and ( has_role('admin')                    -- admin: into any session
+                     or ( has_role('collector')           -- collector: only into today's open session
+                          and exists ( select 1 from public.sessions s
+                                       where s.id = entries.session_id
+                                         and s.session_date = dublin_today()
+                                         and s.transferred is not true ) ) ) );
 
 drop policy if exists "staff remove entries" on public.entries;  -- remove first if an earlier run made it, so re-running is safe
 create policy "staff remove entries" on public.entries    -- who can DELETE entries ("remove" link)
